@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-func WhyPending(pod *v1.Pod, pods []v1.Pod, nodes []v1.Node) []Detail {
+func WhyPending(pod *v1.Pod, pods []v1.Pod, nodes []v1.Node, pvs []v1.PersistentVolume) []Detail {
 	if pod == nil {
 		return nil
 	}
@@ -28,12 +28,12 @@ func WhyPending(pod *v1.Pod, pods []v1.Pod, nodes []v1.Node) []Detail {
 	for i := range nodes {
 		node := &nodes[i]
 		nodePods := node2pods[node.Name]
-		ans = append(ans, whySingleNode(pod, nodePods, node))
+		ans = append(ans, whySingleNode(pod, nodePods, node, pvs))
 	}
 	return ans
 }
 
-func whySingleNode(pod *v1.Pod, nodePods []v1.Pod, node *v1.Node) Detail {
+func whySingleNode(pod *v1.Pod, nodePods []v1.Pod, node *v1.Node, pvs []v1.PersistentVolume) Detail {
 	ans := Detail{
 		NodeName:                node.Name,
 		ResourceNotEnough:       whyResource(pod, nodePods, node),
@@ -41,6 +41,7 @@ func whySingleNode(pod *v1.Pod, nodePods []v1.Pod, node *v1.Node) Detail {
 		NodeTaintNotTolerated:   whyNodeTaint(pod, node),
 		PodAffinityMismatch:     whyPodAffinity(pod, nodePods, node),
 		PodAntiAffinityMismatch: whyPodAntiAffinity(pod, nodePods, node),
+		PvAffinityMismatch:      whyPvAffinity(node, pvs),
 	}
 	if len(ans.ResourceNotEnough)+len(ans.NodeAffinityMismatch)+len(ans.NodeTaintNotTolerated)+
 		len(ans.PodAffinityMismatch)+len(ans.PodAntiAffinityMismatch) == 0 {
@@ -330,4 +331,23 @@ func podMatchesAffinityTerm(matchingNamespace string, pod *v1.Pod, term *v1.PodA
 		}
 	}
 	return true
+}
+
+func whyPvAffinity(node *v1.Node, pvs []v1.PersistentVolume) []DetailPvAffinityMismatch {
+	var mismatches []DetailPvAffinityMismatch
+	for _, pv := range pvs {
+		na := pv.Spec.NodeAffinity
+		if na == nil || na.Required == nil {
+			continue
+		}
+		for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
+			if !nodeSelectorTermMatch(node, term) {
+				mismatches = append(mismatches, DetailPvAffinityMismatch{
+					PvName: pv.Name,
+					Term:   term,
+				})
+			}
+		}
+	}
+	return mismatches
 }

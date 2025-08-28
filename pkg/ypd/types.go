@@ -15,10 +15,8 @@ const (
 	ReasonNodeAffinityMismatch    Reason = "NodeAffinityMismatch"
 	ReasonPodAffinityMismatch     Reason = "PodAffinityMismatch"
 	ReasonPodAntiAffinityMismatch Reason = "PodAntiAffinityMismatch"
+	ReasonPvAffinityMismatch      Reason = "PvAffinityMismatch"
 	ReasonSchedulable             Reason = "Schedulable"
-
-	// TODO
-	ReasonPvAffinityMismatch Reason = "PvAffinityMismatch"
 )
 
 type Detail struct {
@@ -29,6 +27,7 @@ type Detail struct {
 	NodeAffinityMismatch    []DetailNodeAffinityMismatch    `json:"nodeAffinityMismatch,omitempty"`
 	PodAffinityMismatch     []DetailPodAffinityMismatch     `json:"podAffinityMismatch,omitempty"`
 	PodAntiAffinityMismatch []DetailPodAntiAffinityMismatch `json:"podAntiAffinityMismatch,omitempty"`
+	PvAffinityMismatch      []DetailPvAffinityMismatch      `json:"pvAffinityMismatch,omitempty"`
 }
 
 func (w *Detail) String() string {
@@ -47,6 +46,9 @@ func (w *Detail) String() string {
 	}
 	if len(w.PodAntiAffinityMismatch) > 0 {
 		args = append(args, string(ReasonPodAntiAffinityMismatch))
+	}
+	if len(w.PvAffinityMismatch) > 0 {
+		args = append(args, string(ReasonPvAffinityMismatch))
 	}
 	if len(args) == 1 {
 		args = append(args, string(ReasonSchedulable))
@@ -76,4 +78,9 @@ type DetailPodAntiAffinityMismatch struct {
 	Term      corev1.PodAffinityTerm `json:"term"`
 	Namespace string                 `json:"namespace"`
 	PodName   string                 `json:"podName"`
+}
+
+type DetailPvAffinityMismatch struct {
+	Term   corev1.NodeSelectorTerm `json:"term"`
+	PvName string                  `json:"pvName"`
 }

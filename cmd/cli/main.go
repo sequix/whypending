@@ -23,11 +23,6 @@ func main() {
 				Usage: "Path to kubeconfig. Use ~/.kube/config or InClusterConfig by default",
 			},
 			&cli.BoolFlag{
-				Name:    constant.FlagAll,
-				Aliases: []string{"a"},
-				Usage:   "Show all scheduling factors including summary",
-			},
-			&cli.BoolFlag{
 				Name:    constant.FlagJson,
 				Aliases: []string{"j"},
 				Usage:   "Show json",

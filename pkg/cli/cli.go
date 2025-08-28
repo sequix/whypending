@@ -24,14 +24,14 @@ func Action(ctx context.Context, argv *cli.Command) error {
 	var (
 		namespace = argv.Args().Get(0)
 		podName   = argv.Args().Get(1)
-		showAll   = argv.Bool(constant.FlagAll)
 		showJson  = argv.Bool(constant.FlagJson)
+		k8sClient = k8s.Client().CoreV1()
 	)
-	podList, err := k8s.Client().CoreV1().Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	podList, err := k8sClient.Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
-	nodeList, err := k8s.Client().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	nodeList, err := k8sClient.Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list nodes: %w", err)
 	}
@@ -39,6 +39,7 @@ func Action(ctx context.Context, argv *cli.Command) error {
 		pod   *v1.Pod
 		pods  = podList.Items
 		nodes = nodeList.Items
+		pvs   []v1.PersistentVolume
 	)
 	for i := range pods {
 		p := &pods[i]
@@ -50,43 +51,70 @@ func Action(ctx context.Context, argv *cli.Command) error {
 	if pod == nil {
 		return fmt.Errorf("not found pod %s/%s", namespace, podName)
 	}
-	ans := ypd.WhyPending(pod, pods, nodes)
+	for _, v := range pod.Spec.Volumes {
+		if v.PersistentVolumeClaim == nil {
+			continue
+		}
+		pvcName := v.PersistentVolumeClaim.ClaimName
+		pvc, err := k8sClient.PersistentVolumeClaims(pod.Namespace).Get(ctx, pvcName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get pvc %s/%s: %w", pod.Namespace, pvcName, err)
+		}
+		pvName := pvc.Spec.VolumeName
+		if len(pvName) == 0 {
+			continue
+		}
+		pv, err := k8sClient.PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get pv %s: %w", pvName, err)
+		}
+		pvs = append(pvs, *pv)
+	}
+	ans := ypd.WhyPending(pod, pods, nodes, pvs)
 
 	if showJson {
-		enc := json.NewEncoder(os.Stdout)
-		for _, a := range ans {
-			_ = enc.Encode(a)
-		}
+		printJson(ans)
 		return nil
 	}
-	if showAll {
-		fmt.Println("Summary:")
-		printSummary(ans)
-		fmt.Println()
-
-		fmt.Println("Resource:")
-		printResource(ans)
-		fmt.Println()
-
-		fmt.Println("Node Affinity:")
-		printNodeAffinity(ans)
-		fmt.Println()
-
-		fmt.Println("Taint:")
-		printTaint(ans)
-		fmt.Println()
-
-		fmt.Println("Pod Anti-Affinity:")
-		printPodAntiAffinity(ans)
-		fmt.Println()
-
-		fmt.Println("Pod Affinity:")
-		printPodAffinity(ans)
-		fmt.Println()
-		return nil
-	}
-	printSummary(ans)
+	printAll(ans)
 	return nil
+}
+
+func printJson(ans []ypd.Detail) {
+	enc := json.NewEncoder(os.Stdout)
+	for _, a := range ans {
+		_ = enc.Encode(a)
+	}
+}
+
+func printAll(ans []ypd.Detail) {
+	fmt.Println("Summary:")
+	printSummary(ans)
+	fmt.Println()
+
+	fmt.Println("Resources not enough:")
+	printResource(ans)
+	fmt.Println()
+
+	fmt.Println("Node affinity mismatches:")
+	printNodeAffinity(ans)
+	fmt.Println()
+
+	fmt.Println("Taints not tolerated:")
+	printTaint(ans)
+	fmt.Println()
+
+	fmt.Println("Pod anti-affinity mismatches:")
+	printPodAntiAffinity(ans)
+	fmt.Println()
+
+	fmt.Println("Pod affinity mismatches:")
+	printPodAffinity(ans)
+	fmt.Println()
+
+	fmt.Println("Pv affinity mismatches:")
+	printPvAffinity(ans)
+	fmt.Println()
 }
 
 func printSummary(ans []ypd.Detail) {
@@ -166,6 +194,24 @@ func printPodAntiAffinity(ans []ypd.Detail) {
 		for _, r := range a.PodAntiAffinityMismatch {
 			f := fmt.Sprintf("%s/%s", r.Namespace, r.PodName)
 			fields = append(fields, f)
+		}
+		if len(fields) > 1 {
+			fmt.Println(strings.Join(fields, " "))
+		}
+	}
+}
+
+func printPvAffinity(ans []ypd.Detail) {
+	var fields []string
+	for _, a := range ans {
+		fields = fields[:0]
+		fields = append(fields, a.NodeName)
+		pvNames := map[string]struct{}{}
+		for _, r := range a.PvAffinityMismatch {
+			pvNames[r.PvName] = struct{}{}
+		}
+		for pv := range pvNames {
+			fields = append(fields, pv)
 		}
 		if len(fields) > 1 {
 			fmt.Println(strings.Join(fields, " "))

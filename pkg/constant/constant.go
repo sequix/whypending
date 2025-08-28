@@ -5,5 +5,4 @@ const (
 	FlagNamespace  = "namespace"
 	FlagPodName    = "pod"
 	FlagJson       = "json"
-	FlagAll        = "all"
 )
